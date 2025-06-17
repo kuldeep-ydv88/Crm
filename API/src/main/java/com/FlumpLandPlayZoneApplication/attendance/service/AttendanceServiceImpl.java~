@@ -38,13 +38,14 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final InventoryService inventoryService;
 
     private static List<ActivityDto> createDto(Attendance attendance) {
-        return attendance.getActivities().stream()
+        List<ActivityDto> activityDtos = attendance.getActivities().stream()
                 .map(activity -> {
                     ActivityDto dto = new ActivityDto();
                     dto.setActivityName(activity.getActivityName());
                     dto.setPrice(activity.getPrice());
                     return dto;
                 }).collect(Collectors.toList());
+        return activityDtos;
     }
 
     @Override
@@ -112,6 +113,9 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     public InventoryResponse getInventoryDetails(String attendanceId) {
         Attendance attendance = mongoTemplate.findById(attendanceId, Attendance.class);
+        if (attendance == null) {
+            throw new RuntimeException("Attendance record not found for ID: " + attendanceId);
+        }
         final var activity = createDto(attendance);
         final var inventory = inventoryResponse(attendance);
         InventoryResponse response = new InventoryResponse();
@@ -124,7 +128,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     private List<InventoryDto> inventoryResponse(Attendance attendance) {
-        return attendance.getInventories().stream()
+        List<InventoryDto> inventoryDtos = attendance.getInventories().stream()
                 .map(inventoryItem -> {
                     Inventory inventory = inventoryService.getInventory(inventoryItem.getInventoryId());
                     InventoryDto dto = new InventoryDto();
@@ -133,6 +137,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                     dto.setQuantity(inventoryItem.getQuantity());
                     return dto;
                 }).collect(Collectors.toList());
+        return inventoryDtos;
     }
 
     @Override
@@ -141,20 +146,27 @@ public class AttendanceServiceImpl implements AttendanceService {
         UserInfo userInfo = userService.findById(requestDto.getUserId());
         userInfo.setActivityAdded(true);
         mongoTemplate.save(userInfo);
-        existingAttendance.setUserId(requestDto.getUserId());
-        List<Activity> updatedActivities = requestDto.getActivities().stream()
-                .map(activityService::getActivityInfo).collect(Collectors.toList());
-        existingAttendance.setActivities(updatedActivities);
-        List<PurchasedItems> updatedInventories = requestDto.getInventories().stream()
-                .map(item -> new PurchasedItems(item.getInventoryId(), item.getQuantity())).toList();
-        existingAttendance.setInventories(updatedInventories);
-        mongoTemplate.save(existingAttendance);
-        return existingAttendance;
+        if (existingAttendance != null) {
+            existingAttendance.setUserId(requestDto.getUserId());
+            List<Activity> updatedActivities = requestDto.getActivities().stream()
+                    .map(activityService::getActivityInfo).collect(Collectors.toList());
+            existingAttendance.setActivities(updatedActivities);
+            List<PurchasedItems> updatedInventories = requestDto.getInventories().stream()
+                    .map(item -> new PurchasedItems(item.getInventoryId(), item.getQuantity())).toList();
+            existingAttendance.setInventories(updatedInventories);
+            mongoTemplate.save(existingAttendance);
+            return existingAttendance;
+        } else {
+            throw new RuntimeException("Attendance record not found for ID: " + attendanceId);
+        }
     }
 
     @Override
     public AttendanceDetailsDTO getAttendanceById(String id) {
         Attendance attendance = mongoTemplate.findById(id, Attendance.class);
+        if (attendance == null) {
+            throw new RuntimeException("Attendance record not found for ID: " + id);
+        }
         List<PurchasedItemsDTO> purchasedItemsDTOs = new ArrayList<>();
         inventoryResponse(attendance, purchasedItemsDTOs);
         return  createResponse(attendance, purchasedItemsDTOs);
@@ -165,7 +177,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             attendance.getInventories().forEach(inventory -> {
                 Inventory puchasedInventory = mongoTemplate.findById(inventory.getInventoryId(), Inventory.class);
                 PurchasedItemsDTO dto = new PurchasedItemsDTO();
-                purchaseDto(inventory, dto, puchasedInventory);
+                if (puchasedInventory != null) {
+                    purchaseDto(inventory, dto, puchasedInventory);
+                }
                 purchasedItemsDTOs.add(dto);
             });
         }
@@ -206,6 +220,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             throw new IllegalStateException("No attendance record found for this attendance Id");
         }
 
+        if (checkedInAttendance == null) {
+            throw new IllegalStateException("No valid check-in found or already checked out.");
+        }
         checkedInAttendance.setCheckout(LocalDateTime.now());
         mongoTemplate.save(checkedInAttendance);
         Query userInfoQuery = Query.query(
