@@ -3,7 +3,7 @@ server:
 
 spring:
   application:
-    name: FlumpLandPlayZoneApplication
+    name: CrmApplication
 
   data:
     mongodb:
